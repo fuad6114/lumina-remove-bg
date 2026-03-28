@@ -28,7 +28,7 @@ COPY --from=builder /root/.u2net /root/.u2net
 
 # Copy application code
 COPY main.py processor.py ./
-COPY static ./static
+#COPY static ./static
 
 EXPOSE 8000
 
