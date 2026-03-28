@@ -1,0 +1,29 @@
+# Background Removal API – Python dependencies
+# Install: pip install -r requirements.txt
+
+# Core ML / image processing
+rembg[gpu]>=2.0.50          # U2-Net wrapper; uses GPU if CUDA available, else CPU
+Pillow>=10.0.0
+opencv-python-headless>=4.8.0  # headless = no GUI deps (server-safe)
+numpy>=1.24.0
+
+# FastAPI stack (production-grade ASGI)
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0   # ASGI server with websocket + HTTP/2 support
+python-multipart>=0.0.9     # required by FastAPI for file upload parsing
+
+# Flask alternative (optional – comment out if using FastAPI only)
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# Utilities
+aiofiles>=23.2.1            # async static file serving
+
+# ── GPU note ──────────────────────────────────────────────────────────────────
+# For NVIDIA GPU acceleration replace the rembg line above with:
+#   rembg[gpu]>=2.0.50
+# and install CUDA-enabled onnxruntime:
+#   pip install onnxruntime-gpu
+# CPU-only (default, works everywhere):
+#   rembg>=2.0.50
+#   pip install onnxruntime

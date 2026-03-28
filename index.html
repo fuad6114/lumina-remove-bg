@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CutOut AI — Background Removal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  /* ── Reset & Variables ─────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --ink:      #0d0d0d;
+    --paper:    #f5f3ee;
+    --accent:   #e8ff47;
+    --mid:      #b8b5ae;
+    --card:     #ffffff;
+    --border:   #e2dfd8;
+    --danger:   #ff4444;
+    --success:  #00c87a;
+    --radius:   16px;
+    --mono:     'DM Mono', monospace;
+    --sans:     'Syne', sans-serif;
+    --shadow:   0 4px 40px rgba(0,0,0,.08);
+  }
+
+  html { font-size: 16px; }
+  body {
+    font-family: var(--sans);
+    background: var(--paper);
+    color: var(--ink);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Noise texture overlay ──────────────────────────────────────── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+    opacity: .6;
+  }
+
+  /* ── Layout ─────────────────────────────────────────────────────── */
+  .page { position: relative; z-index: 1; max-width: 1080px; margin: 0 auto; padding: 0 24px 80px; }
+
+  /* ── Header ─────────────────────────────────────────────────────── */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 28px 0 36px;
+    border-bottom: 1.5px solid var(--border);
+  }
+  .logo {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 1.25rem; font-weight: 800; letter-spacing: -.02em;
+  }
+  .logo-dot {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--ink);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .logo-dot svg { width: 14px; fill: var(--accent); }
+  .badge {
+    font-family: var(--mono); font-size: .7rem; font-weight: 400;
+    background: var(--accent); color: var(--ink);
+    padding: 3px 10px; border-radius: 20px; letter-spacing: .05em;
+  }
+
+  /* ── Hero ───────────────────────────────────────────────────────── */
+  .hero { padding: 64px 0 48px; max-width: 640px; }
+  .hero h1 {
+    font-size: clamp(2.4rem, 5vw, 3.8rem);
+    font-weight: 800; line-height: 1.05; letter-spacing: -.04em;
+    margin-bottom: 18px;
+  }
+  .hero h1 em {
+    font-style: normal;
+    background: var(--ink);
+    color: var(--accent);
+    padding: 0 8px; border-radius: 6px;
+    display: inline-block; transform: rotate(-1deg);
+  }
+  .hero p {
+    font-size: 1.05rem; color: #555; line-height: 1.65;
+    font-family: 'DM Mono', monospace; font-weight: 300;
+  }
+
+  /* ── Endpoint pill ──────────────────────────────────────────────── */
+  .endpoint-bar {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--ink); color: var(--paper);
+    border-radius: 10px; padding: 10px 16px;
+    font-family: var(--mono); font-size: .8rem;
+    margin-bottom: 36px; width: fit-content;
+  }
+  .method { background: var(--accent); color: var(--ink); padding: 2px 8px; border-radius: 5px; font-weight: 600; }
+
+  /* ── Main card ──────────────────────────────────────────────────── */
+  .card {
+    background: var(--card);
+    border: 1.5px solid var(--border);
+    border-radius: 24px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .card-inner { display: grid; grid-template-columns: 1fr 1fr; min-height: 440px; }
+  @media (max-width: 680px) { .card-inner { grid-template-columns: 1fr; } }
+
+  /* ── Drop zone ──────────────────────────────────────────────────── */
+  .drop-panel {
+    padding: 32px;
+    border-right: 1.5px solid var(--border);
+    display: flex; flex-direction: column; gap: 20px;
+  }
+  @media (max-width: 680px) { .drop-panel { border-right: none; border-bottom: 1.5px solid var(--border); } }
+
+  .panel-label {
+    font-size: .72rem; font-weight: 700; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--mid);
+  }
+
+  .drop-zone {
+    flex: 1;
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px;
+    cursor: pointer; transition: border-color .2s, background .2s;
+    padding: 24px; text-align: center;
+    min-height: 240px; position: relative;
+  }
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--ink); background: #fafaf8;
+  }
+  .drop-zone input[type=file] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+  }
+  .drop-icon {
+    width: 52px; height: 52px; border-radius: 14px;
+    background: var(--paper); border: 1.5px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .drop-icon svg { width: 22px; stroke: var(--ink); fill: none; stroke-width: 1.8; }
+  .drop-title { font-weight: 700; font-size: 1rem; }
+  .drop-sub { font-size: .8rem; color: var(--mid); font-family: var(--mono); }
+
+  /* Preview inside drop zone */
+  .drop-zone.has-image { border-style: solid; border-color: var(--border); padding: 0; overflow: hidden; }
+  .drop-zone.has-image img { width: 100%; height: 100%; object-fit: contain; max-height: 320px; }
+  .drop-zone.has-image .drop-placeholder { display: none; }
+
+  /* ── Controls ───────────────────────────────────────────────────── */
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--sans); font-weight: 700; font-size: .88rem;
+    padding: 11px 20px; border-radius: 10px; border: none; cursor: pointer;
+    transition: transform .12s, box-shadow .12s, opacity .15s;
+    letter-spacing: -.01em;
+  }
+  .btn:active { transform: scale(.97); }
+  .btn-primary { background: var(--ink); color: var(--accent); }
+  .btn-primary:hover { box-shadow: 0 4px 20px rgba(0,0,0,.18); }
+  .btn-primary:disabled { opacity: .4; cursor: not-allowed; transform: none; box-shadow: none; }
+  .btn-ghost { background: var(--paper); color: var(--ink); border: 1.5px solid var(--border); }
+  .btn-ghost:hover { border-color: var(--ink); }
+
+  .btn svg { width: 16px; stroke: currentColor; fill: none; stroke-width: 2; flex-shrink: 0; }
+
+  /* ── Result panel ───────────────────────────────────────────────── */
+  .result-panel {
+    padding: 32px;
+    display: flex; flex-direction: column; gap: 20px;
+  }
+
+  .result-canvas {
+    flex: 1; border-radius: var(--radius);
+    background:
+      linear-gradient(45deg, #e8e8e8 25%, transparent 25%) -8px 0,
+      linear-gradient(-45deg, #e8e8e8 25%, transparent 25%) -8px 0,
+      linear-gradient(45deg, transparent 75%, #e8e8e8 75%),
+      linear-gradient(-45deg, transparent 75%, #e8e8e8 75%);
+    background-size: 16px 16px;
+    background-color: #f0f0f0;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 240px; overflow: hidden;
+    border: 1.5px solid var(--border);
+    position: relative;
+  }
+  .result-canvas img { width: 100%; height: 100%; object-fit: contain; max-height: 320px; }
+  .result-placeholder {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    color: var(--mid); font-size: .82rem; font-family: var(--mono);
+  }
+  .result-placeholder svg { width: 32px; stroke: var(--mid); fill: none; stroke-width: 1.5; opacity: .6; }
+
+  /* ── Progress / Spinner ─────────────────────────────────────────── */
+  .progress-wrap {
+    position: absolute; inset: 0;
+    background: rgba(255,255,255,.88); backdrop-filter: blur(6px);
+    display: none; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px;
+    border-radius: var(--radius);
+  }
+  .progress-wrap.active { display: flex; }
+  .spinner {
+    width: 40px; height: 40px;
+    border: 3px solid var(--border);
+    border-top-color: var(--ink);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .progress-label { font-family: var(--mono); font-size: .8rem; color: var(--ink); }
+
+  /* ── Status / Error ─────────────────────────────────────────────── */
+  .status-bar {
+    display: none;
+    align-items: center; gap: 10px;
+    padding: 12px 16px; border-radius: 10px;
+    font-size: .82rem; font-family: var(--mono);
+  }
+  .status-bar.show { display: flex; }
+  .status-bar.error { background: #fff0f0; border: 1.5px solid #ffd0d0; color: var(--danger); }
+  .status-bar.success { background: #f0fff8; border: 1.5px solid #b0f0d8; color: #008855; }
+  .status-bar svg { width: 16px; flex-shrink: 0; }
+
+  /* ── Stat chips ─────────────────────────────────────────────────── */
+  .stat-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .stat { background: var(--paper); border: 1.5px solid var(--border); border-radius: 8px; padding: 6px 12px; }
+  .stat-label { font-size: .65rem; font-family: var(--mono); color: var(--mid); text-transform: uppercase; letter-spacing: .06em; }
+  .stat-val { font-size: .88rem; font-weight: 700; }
+
+  /* ── API Docs section ───────────────────────────────────────────── */
+  .docs { margin-top: 56px; }
+  .docs h2 { font-size: 1.5rem; font-weight: 800; margin-bottom: 24px; letter-spacing: -.03em; }
+
+  .route-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+  .route-card {
+    background: var(--card); border: 1.5px solid var(--border);
+    border-radius: var(--radius); padding: 22px;
+    transition: box-shadow .2s;
+  }
+  .route-card:hover { box-shadow: var(--shadow); }
+
+  .route-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .method-pill {
+    font-family: var(--mono); font-size: .7rem; font-weight: 600;
+    padding: 3px 9px; border-radius: 5px;
+  }
+  .get-pill  { background: #e8f5ff; color: #0066cc; }
+  .post-pill { background: #fff3e0; color: #b05500; }
+
+  .route-path { font-family: var(--mono); font-size: .85rem; font-weight: 400; }
+  .route-desc { font-size: .83rem; color: #666; line-height: 1.5; margin-bottom: 12px; }
+
+  .code-block {
+    background: var(--ink); color: var(--accent);
+    border-radius: 10px; padding: 14px; overflow-x: auto;
+    font-family: var(--mono); font-size: .75rem; line-height: 1.6;
+    white-space: pre;
+  }
+
+  /* ── Footer ─────────────────────────────────────────────────────── */
+  footer {
+    margin-top: 64px; padding-top: 24px; border-top: 1.5px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+    font-size: .78rem; color: var(--mid); font-family: var(--mono);
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Header -->
+  <header>
+    <div class="logo">
+      <div class="logo-dot">
+        <svg viewBox="0 0 24 24"><path d="M12 2 L22 20 L2 20 Z"/></svg>
+      </div>
+      CutOut AI
+    </div>
+    <span class="badge">U2-Net · rembg</span>
+  </header>
+
+  <!-- Hero -->
+  <section class="hero">
+    <h1>Remove any<br>background <em>instantly</em></h1>
+    <p>Upload an image → AI detects subject → white background applied.<br>
+       Powered by U2-Net deep learning + edge smoothing.</p>
+  </section>
+
+  <!-- Endpoint hint -->
+  <div class="endpoint-bar">
+    <span class="method">POST</span>
+    <span>/remove-background</span>
+    <span style="color:#888; margin-left:8px">multipart/form-data · field: file</span>
+  </div>
+
+  <!-- Main tool card -->
+  <div class="card">
+    <div class="card-inner">
+
+      <!-- Input panel -->
+      <div class="drop-panel">
+        <span class="panel-label">Input Image</span>
+
+        <div class="drop-zone" id="dropZone">
+          <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp,image/bmp,image/tiff">
+          <div class="drop-placeholder">
+            <div class="drop-icon">
+              <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            </div>
+            <span class="drop-title">Drop image or click</span>
+            <span class="drop-sub">JPEG · PNG · WEBP · BMP · TIFF · max 20 MB</span>
+          </div>
+        </div>
+
+        <div class="controls">
+          <button class="btn btn-primary" id="processBtn" disabled>
+            <svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+            Remove Background
+          </button>
+          <button class="btn btn-ghost" id="resetBtn">
+            <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.5"/></svg>
+            Reset
+          </button>
+        </div>
+
+        <div class="status-bar" id="statusBar">
+          <svg viewBox="0 0 24 24" id="statusIcon"></svg>
+          <span id="statusText"></span>
+        </div>
+      </div>
+
+      <!-- Result panel -->
+      <div class="result-panel">
+        <span class="panel-label">Result · White Background</span>
+
+        <div class="result-canvas" id="resultCanvas">
+          <div class="result-placeholder" id="resultPlaceholder">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            <span>Processed image appears here</span>
+          </div>
+          <img id="resultImg" style="display:none">
+          <div class="progress-wrap" id="progressWrap">
+            <div class="spinner"></div>
+            <span class="progress-label" id="progressLabel">Analysing subject…</span>
+          </div>
+        </div>
+
+        <div class="stat-row" id="statRow" style="display:none">
+          <div class="stat"><div class="stat-label">Size</div><div class="stat-val" id="statSize">—</div></div>
+          <div class="stat"><div class="stat-label">Time</div><div class="stat-val" id="statTime">—</div></div>
+          <div class="stat"><div class="stat-label">Format</div><div class="stat-val">PNG</div></div>
+        </div>
+
+        <button class="btn btn-primary" id="downloadBtn" style="display:none; width:fit-content">
+          <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download PNG
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- API Docs -->
+  <section class="docs">
+    <h2>API Reference</h2>
+    <div class="route-cards">
+
+      <div class="route-card">
+        <div class="route-header">
+          <span class="method-pill get-pill">GET</span>
+          <span class="route-path">/health</span>
+        </div>
+        <p class="route-desc">Check that the API and model are online.</p>
+        <div class="code-block">curl http://localhost:8000/health
+
+# → {"status":"ok","model":"u2net"}</div>
+      </div>
+
+      <div class="route-card">
+        <div class="route-header">
+          <span class="method-pill post-pill">POST</span>
+          <span class="route-path">/remove-background</span>
+        </div>
+        <p class="route-desc">Returns the processed PNG binary directly. Best for direct image consumption.</p>
+        <div class="code-block">curl -X POST \
+  http://localhost:8000/remove-background \
+  -F "file=@photo.jpg" \
+  --output result.png</div>
+      </div>
+
+      <div class="route-card">
+        <div class="route-header">
+          <span class="method-pill post-pill">POST</span>
+          <span class="route-path">/remove-background/json</span>
+        </div>
+        <p class="route-desc">Returns base64-encoded PNG + metadata. Ideal for JavaScript frontends.</p>
+        <div class="code-block">fetch('/remove-background/json', {
+  method: 'POST',
+  body: formData   // FormData with 'file' field
+})
+.then(r => r.json())
+.then(({ image_base64, width,
+         height, processing_time_s }) => {
+  img.src = `data:image/png;base64,
+             ${image_base64}`;
+});</div>
+      </div>
+
+    </div>
+  </section>
+
+  <footer>
+    <span>CutOut AI · rembg + U2-Net · OpenCV + Pillow edge refinement</span>
+    <span>FastAPI / Flask compatible · REST API</span>
+  </footer>
+</div>
+
+<script>
+  const dropZone    = document.getElementById('dropZone');
+  const fileInput   = document.getElementById('fileInput');
+  const processBtn  = document.getElementById('processBtn');
+  const resetBtn    = document.getElementById('resetBtn');
+  const resultImg   = document.getElementById('resultImg');
+  const resultPlaceholder = document.getElementById('resultPlaceholder');
+  const progressWrap = document.getElementById('progressWrap');
+  const progressLabel = document.getElementById('progressLabel');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const statusBar   = document.getElementById('statusBar');
+  const statusText  = document.getElementById('statusText');
+  const statusIcon  = document.getElementById('statusIcon');
+  const statRow     = document.getElementById('statRow');
+  const statSize    = document.getElementById('statSize');
+  const statTime    = document.getElementById('statTime');
+
+  let selectedFile = null;
+  let resultBlob   = null;
+
+  // ── Drag & drop ────────────────────────────────────────────────────
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    const f = e.dataTransfer.files[0];
+    if (f) loadFile(f);
+  });
+  fileInput.addEventListener('change', () => { if (fileInput.files[0]) loadFile(fileInput.files[0]); });
+
+  function loadFile(f) {
+    selectedFile = f;
+    const url = URL.createObjectURL(f);
+    const preview = document.createElement('img');
+    preview.src = url;
+    preview.style.cssText = 'width:100%;height:100%;object-fit:contain;max-height:320px;';
+    dropZone.querySelectorAll('img').forEach(el => el.remove());
+    dropZone.querySelector('.drop-placeholder').style.display = 'none';
+    dropZone.appendChild(preview);
+    dropZone.classList.add('has-image');
+    processBtn.disabled = false;
+    clearResult(); clearStatus();
+  }
+
+  // ── Process ────────────────────────────────────────────────────────
+  const progressMessages = [
+    'Analysing subject…',
+    'Running U2-Net segmentation…',
+    'Refining edges…',
+    'Compositing white background…',
+    'Almost done…'
+  ];
+  let progressTimer;
+
+  processBtn.addEventListener('click', async () => {
+    if (!selectedFile) return;
+
+    clearResult(); clearStatus();
+    showProgress(true);
+    processBtn.disabled = true;
+
+    let msgIdx = 0;
+    progressLabel.textContent = progressMessages[0];
+    progressTimer = setInterval(() => {
+      msgIdx = (msgIdx + 1) % progressMessages.length;
+      progressLabel.textContent = progressMessages[msgIdx];
+    }, 1400);
+
+    const fd = new FormData();
+    fd.append('file', selectedFile);
+
+    const t0 = Date.now();
+    try {
+      const res = await fetch('/remove-background', { method: 'POST', body: fd });
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
+        throw new Error(err.detail || res.statusText);
+      }
+
+      resultBlob = await res.blob();
+      const url = URL.createObjectURL(resultBlob);
+
+      resultImg.src = url;
+      resultImg.style.display = 'block';
+      resultPlaceholder.style.display = 'none';
+
+      const srvTime = res.headers.get('X-Processing-Time') || elapsed + 's';
+      statSize.textContent = (resultBlob.size / 1024).toFixed(0) + ' KB';
+      statTime.textContent = srvTime;
+      statRow.style.display = 'flex';
+      downloadBtn.style.display = 'inline-flex';
+
+      showStatus('success', `Background removed in ${srvTime}.`);
+    } catch (err) {
+      showStatus('error', err.message || 'Processing failed.');
+    } finally {
+      clearInterval(progressTimer);
+      showProgress(false);
+      processBtn.disabled = false;
+    }
+  });
+
+  // ── Download ───────────────────────────────────────────────────────
+  downloadBtn.addEventListener('click', () => {
+    if (!resultBlob) return;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(resultBlob);
+    a.download = 'removed_bg.png';
+    a.click();
+  });
+
+  // ── Reset ──────────────────────────────────────────────────────────
+  resetBtn.addEventListener('click', () => {
+    selectedFile = null; resultBlob = null;
+    fileInput.value = '';
+    dropZone.querySelectorAll('img').forEach(el => el.remove());
+    dropZone.querySelector('.drop-placeholder').style.display = '';
+    dropZone.classList.remove('has-image');
+    processBtn.disabled = true;
+    clearResult(); clearStatus();
+  });
+
+  // ── Helpers ────────────────────────────────────────────────────────
+  function showProgress(on) {
+    progressWrap.classList.toggle('active', on);
+  }
+  function clearResult() {
+    resultImg.style.display = 'none'; resultImg.src = '';
+    resultPlaceholder.style.display = '';
+    downloadBtn.style.display = 'none';
+    statRow.style.display = 'none';
+  }
+  function clearStatus() {
+    statusBar.className = 'status-bar';
+    statusText.textContent = '';
+  }
+  function showStatus(type, msg) {
+    statusBar.className = `status-bar show ${type}`;
+    statusText.textContent = msg;
+    statusIcon.innerHTML = type === 'error'
+      ? '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>'
+      : '<polyline points="20 6 9 17 4 12"/>';
+  }
+</script>
+</body>
+</html>
